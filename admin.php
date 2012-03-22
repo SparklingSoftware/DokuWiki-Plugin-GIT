@@ -100,7 +100,7 @@ class admin_plugin_git extends DokuWiki_Admin_Plugin {
 
     function git_commit() {
       
-      $cmd = 'cd '.$this->git_repo_path.' && "C:\Program Files (x86)\Git\bin\git.exe" commit -am "'.$this->commit_message.'" 2>&1';
+      $cmd = 'cd '.$this->git_repo_path.' && "C:\Program Files (x86)\Git\bin\git.exe" add . -A && "C:\Program Files (x86)\Git\bin\git.exe" commit -am "'.$this->commit_message.'" 2>&1';
 
       $result = shell_exec($cmd);
       return $result;      
