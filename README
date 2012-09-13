@@ -1,0 +1,4 @@
+This is a simple Git plugin for dokuwiki.
+Go to the dokuwiki pluginsite to see how to install it: https://www.dokuwiki.org/plugin:git
+
+Changes 2012-09-13: Linux Support added (by Helena Schmidt)
