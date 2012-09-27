@@ -22,7 +22,15 @@ class admin_plugin_git extends DokuWiki_Admin_Plugin {
     var $commit_message = 'No Comment';
     var $git_repo_path = DOKU_INC;
     var $master_repo = '';
-  
+    var $git_binary = "";
+
+    function __construct() {
+        if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+            $this->git_binary = "C:\Program Files (x86)\Git\bin\git.exe";
+        } else {
+            $this->git_binary = 'git';
+        }
+    }
     /**
      * handle user request
      */
@@ -92,22 +100,20 @@ class admin_plugin_git extends DokuWiki_Admin_Plugin {
 
     function git_status() {
       
-      $cmd = 'cd '.$this->git_repo_path.' && "C:\Program Files (x86)\Git\bin\git.exe" status 2>&1';
+      $cmd = 'cd '.$this->git_repo_path.' && ' . $this->git_binary . ' status 2>&1';
 
       $result = shell_exec($cmd);
       return $result;
     } 
 
     function git_commit() {
-      
-      $cmd = 'cd '.$this->git_repo_path.' && "C:\Program Files (x86)\Git\bin\git.exe" add . -A && "C:\Program Files (x86)\Git\bin\git.exe" commit -am "'.$this->commit_message.'" 2>&1';
-
+      $cmd = 'cd '.$this->git_repo_path." && $this->git_binary". ' add . -A && ' . $this->git_binary . ' commit -am "'.$this->commit_message.'" 2>&1';
       $result = shell_exec($cmd);
       return $result;      
     } 
 
     function git_push() {
-      $cmd = 'cd '.$this->git_repo_path.' && "C:\Program Files (x86)\Git\bin\git.exe" push '.$this->master_repo.' 2>&1';
+      $cmd = 'cd '.$this->git_repo_path.' && ' . $this->git_binary . ' push '.$this->master_repo.' 2>&1';
 
       $result = shell_exec($cmd);
       return $result;
