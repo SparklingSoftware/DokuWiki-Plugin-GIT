@@ -3,6 +3,6 @@ author Stephan Dekker
 email  Stephan@SparklingSoftware.com.au
 date   2012-03-15
 name   GIT plugin
-desc   THis plugin allows you to perform GIT actions from the adminstrator console. It allows, amongst other things to commit changes locally while asking for a commit message and push to the (master <- default) repository.
+desc   THis plugin allows you to perform GIT actions. It allows, amongst other things to commit changes locally while asking for a commit message and push to the (master <- default) repository.
 url    http://www.dokuwiki.org/plugin:git', http://www.SparklingSoftware.com.au
 
