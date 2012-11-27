@@ -290,7 +290,7 @@ class GitRepo {
 	public function get_status($porcelain=true) {
         try
         {            
-            if ($porcelain) return $this->run("status --porcelain");
+            if ($porcelain) return $this->run("status -u --porcelain");
             return $this->run("status");
         }
         catch(Exception $e)
@@ -362,14 +362,19 @@ class GitRepo {
 	 * @return  string
 	 */
 	public function commit($message = "blank") {
-        $cmd = "add . -A";
-        $fullcmd = "cd \"".$this->repo_path."\" && ".$this->git_path." ".$cmd;
-        $this->run_command($fullcmd);
+        try {
+            $cmd = "add . -A";
+            $fullcmd = "cd \"".$this->repo_path."\" && ".$this->git_path." ".$cmd;
+            $this->run_command($fullcmd);
         
-//        $cmd = "commit -am \"first commit\"";
-        $cmd = "commit -am \"".$message."\"";
-        $fullcmd = "cd \"".$this->repo_path."\" && ".$this->git_path." ".$cmd;
-		$this->run_command($fullcmd);
+            $cmd = "commit -am \"".$message."\"";
+            $fullcmd = "cd \"".$this->repo_path."\" && ".$this->git_path." ".$cmd;
+		    $this->run_command($fullcmd);
+        }
+        Catch (Exception $e)
+        {
+            msg($e->getMessage());
+        }
 	}
     
 	/**
