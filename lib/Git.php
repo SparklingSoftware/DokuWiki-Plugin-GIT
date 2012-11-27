@@ -82,6 +82,11 @@ class Git {
 class GitRepo {
 
 	protected $repo_path = null;
+    
+    public function get_repo_path() {
+        return $this->repo_path;
+    }
+        
 
 //	public $git_path = '/usr/bin/git';
     // TODO: Read path from plugin config
@@ -402,7 +407,15 @@ class GitRepo {
 	 * @return  string
 	 */
 	public function clone_from($source) {
-		return $this->run("clone --local $source ".$this->repo_path);
+        try {
+            $cmd = "clone --local $source \"".$this->repo_path."\"";
+            $fullcmd = "cd \"".$this->repo_path."\" && ".$this->git_path." ".$cmd;
+		    $this->run_command($fullcmd);
+        }
+        Catch (Exception $e)
+        {
+            msg($e->getMessage());
+        }
 	}
 
 	/**
