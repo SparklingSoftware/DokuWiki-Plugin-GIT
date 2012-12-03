@@ -29,10 +29,10 @@ class action_plugin_git_javascript extends DokuWiki_Action_Plugin {
 		$data = $this->git_commit_select();
         ptln($data);
         
-		$event->data['script'][] = array(
-			'type' => 'text/javascript',
-			'charset' => 'utf-8',
-			'_data' => $data,
-		);
+		//$event->data['script'][] = array(
+		//	'type' => 'text/javascript',
+		//	'charset' => 'utf-8',
+		//	'_data' => $data,
+		//);
 	}
 }

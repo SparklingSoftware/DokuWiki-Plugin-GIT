@@ -17,6 +17,8 @@ class action_plugin_git_push extends DokuWiki_Action_Plugin {
     
 	function _handle(&$event, $param) {
 
+        if ($_REQUEST['cmd'] === null) return;
+        
         // verify valid values
         switch (key($_REQUEST['cmd'])) {
             case 'push' : $this->push(); break;

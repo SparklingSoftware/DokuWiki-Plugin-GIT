@@ -33,12 +33,8 @@ class helper_plugin_git extends DokuWiki_Plugin {
         
         try
         {
-            msg('Cloning from: '.$origin.' to: '.$destination);        
             $repo = new GitRepo($destination, true, false);
-            msg($repo->get_repo_path());
             $repo->clone_from($origin);
-            //$repo->checkout('');
-
         }
         catch (Exception $e)
         {
