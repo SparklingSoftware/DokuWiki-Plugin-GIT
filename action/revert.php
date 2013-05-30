@@ -9,11 +9,11 @@ require_once DOKU_PLUGIN.'action.php';
 require_once(DOKU_PLUGIN.'git/lib/Git.php');
 
 
-class action_plugin_git_commit extends DokuWiki_Action_Plugin {
-    
+class action_plugin_git_revert extends DokuWiki_Action_Plugin {
+
     var $helper = null;
     
-    function action_plugin_git_commit(){  
+    function action_plugin_git_revert(){  
         $this->helper =& plugin_load('helper', 'git');
         if (is_null($this->helper)) {
             msg('The GIT plugin could not load its helper class', -1);
@@ -29,42 +29,32 @@ class action_plugin_git_commit extends DokuWiki_Action_Plugin {
 
         if ($_REQUEST['cmd'] === null) return;
         
-        $commit_message = trim($_POST['CommitMessage']);
-        
         // verify valid values
         switch (key($_REQUEST['cmd'])) {
-            case 'commit_current' : 
-                if ($this->commit($commit_message) === false) return; 
-                break;
-            case 'commit_submit' : 
-                $this->helper->submittChangesForApproval();
-                break;
-        }   
+            case 'revert' : $this->revert(); 
+                            $this->helper->changeReadOnly(false);
+                            break;
+            }   
   	}       
-      
-    function commit($commit_message)
+    
+    function revert()
     {
-        try
-        {
+       try {
             global $conf;
             $this->getConf('');
-            
+
             $git_exe_path = $conf['plugin']['git']['git_exe_path'];        
             $datapath = $conf['savedir'];    
             
             $repo = new GitRepo($datapath);
-            $repo->git_path = $git_exe_path;        
-            $result = $repo->commit($commit_message);
-            
-            $this->helper->resetGitStatusCache('local');
-            
-            return true;
-        }
-        catch(Exception $e)
-        {
-            msg($e->getMessage());
-            return false;
-        }
+            $repo->git_path = $git_exe_path;   
+            $repo->revertLastCommit();
+       }
+       catch(Exception $e)
+       {
+          msg($e->getMessage());
+          return false;
+       }
     }
-    
+
 }

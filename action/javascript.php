@@ -20,6 +20,8 @@ class action_plugin_git_javascript extends DokuWiki_Action_Plugin {
                 var hash = jQuery("#git_commit").val();
                 jQuery(".commit_div").hide("fast"); 
                 jQuery("#" + hash).show("fast"); 
+
+                jQuery("#diff_table").hide("fast"); 
             } </script>';            
         return $script;
     }

@@ -11,6 +11,13 @@ require_once(DOKU_PLUGIN.'git/lib/Git.php');
 
 class action_plugin_git_merge extends DokuWiki_Action_Plugin {
     
+    var $helper = null;
+
+    function action_plugin_git_merge (){
+        $this->helper =& plugin_load('helper', 'git');
+        if(!$this->helper) msg('Loading the git helper failed.',-1);
+    }
+
 	function register(&$controller) {
 		$controller->register_hook('TPL_METAHEADER_OUTPUT', 'BEFORE', $this, '_handle');
     }
@@ -21,18 +28,38 @@ class action_plugin_git_merge extends DokuWiki_Action_Plugin {
         
         // verify valid values
         switch (key($_REQUEST['cmd'])) {
-            case 'merge' : $this->merge(); break;
+            case 'merge' : $this->pull(); break;
             case 'ignore' : $this->ignore(); break;
         }   
   	}       
     
-    function merge()
+    function pull()
     {
-        $hash = $_REQUEST['hash'];
-        
-        $repo = new GitRepo(DOKU_INC);
-        $repo->merge($hash);
+        try {
+            global $conf;
+            $this->getConf('');
+
+            $git_exe_path = $conf['plugin']['git']['git_exe_path'];        
+            $datapath = $conf['savedir'];    
+            
+            $repo = new GitRepo($datapath);
+            $repo->git_path = $git_exe_path;   
+            $repo->pull('', '');
+            
+            if(!$this->helper) {
+                msg('GIT helper is null in the merge.php file');
+                return;
+            }
+            $this->helper->resetGitStatusCache('upstream');
+            $this->helper->rebuild_data_plugin_data();
+        }
+        catch(Exception $e)
+        {
+            msg($e->getMessage());
+            return false;
+        }
     }
+
 
     function ignore()
     {

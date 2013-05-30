@@ -13,6 +13,14 @@ require_once(DOKU_INC.'/inc/DifferenceEngine.php');
  * need to inherit from this class
  */
 class syntax_plugin_git_remotestatus extends DokuWiki_Syntax_Plugin {
+
+    var $helper = null;
+
+    function syntax_plugin_git_remotestatus (){
+        $this->helper =& plugin_load('helper', 'git');
+        if(!$this->helper) msg('Loading the git helper in the git_localstatus class failed.', -1);
+    }
+
     /**
      * return some info
      */
@@ -83,99 +91,52 @@ class syntax_plugin_git_remotestatus extends DokuWiki_Syntax_Plugin {
 
             try
             {
+                // If not logged in, go bugger off...
+                if (is_array($INFO['userinfo']) === false)
+                {
+                    $renderer->doc .= "<br/><br/>You need to be logged in to view this page. Please login.";
+                    return;
+                }
+                
                 // Get GIT commits
-                $repo = new GitRepo(DOKU_INC);
+                global $conf;
+                $this->getConf('');
+
+                $git_exe_path = $conf['plugin']['git']['git_exe_path'];        
+                $datapath = $conf['savedir'];    
+                
+                $repo = new GitRepo($datapath);
+                $repo->git_path = $git_exe_path;  
                 $repo->fetch();
                 $log = $repo->get_log();
                 if ($log === "")
                 {
-                    $renderer->doc .= "Current wiki is up to date with Master.";
+                    $renderer->doc .= "There are no upstream updates for the current workspace. It's up to date!";
                     return true;
                 }
+
+                $waiting_to_commit = $repo->get_status();
+                if ($waiting_to_commit !== "") 
+                { 
+                    $gitLocalStatusUrl = wl($conf['plugin']['git']['local_status_page'],'',true);
+                    $renderer->doc .= 'Please commit local changes before you can merge upstream. <a href="'.$gitLocalStatusUrl.'">Local Changes<a/>';
+                    return true;
+                }
+
                 $commits = $repo->get_commits($log);
                 
                 // Render select box
-                $renderer->doc .= "Select something from the Master to merge into the local instance: <br/>";
-                $renderer->doc .= "<select id='git_commit' width=\"300\" style=\"width: 300px\" onchange='ChangeGitCommit();'>";
-                $index = 1;
-                foreach($commits as $commit)
-                {
-                    $renderer->doc .= "<option value=\"".$commit['hash']."\">".$index." - ".$commit['message']."</option>";
-                    $index++;
-                }
-                $renderer->doc .= '</select>';
+                $renderer->doc .= "Select a commit from upstream to view the changes contained in each: <br/>";
+                $this->helper->render_commit_selector($renderer, $commits);                                
+                $this->helper->render_changed_files_table($renderer, $commits, $repo);                    
+                $this->helper->renderChangesMade($renderer, $repo, 'Merge upstream');                
+                                               
                 $renderer->doc .= '<form method="post">';
-                $renderer->doc .= '  <input type="hidden"  name="hash"  value="'.$commits[0]['hash'].'" />';
-                $renderer->doc .= '  <input type="submit" name="cmd[merge]"  value="Merge" />';
+                $renderer->doc .= '  <input type="submit" name="cmd[ignore]"  value="Ignore this commit" />';
+                $renderer->doc .= '  <input type="submit" name="cmd[merge]"  value="Merge All" />';
                 $renderer->doc .= '</form>';
                 $renderer->doc .= '<br/>';
-                
-                $renderer->doc .= '<h3>This is the content of the selected change set:</h3>';
-                $divVisibility = ""; // Make the first div visible as thats the first item in the select box
-                foreach($commits as $commit)
-                {
-                    $renderer->doc .= "<div class=\"commit_div\" id='".$commit['hash']."' style=\"".$divVisibility." width: 100%;height: 175px;overflow:-moz-scrollbars-vertical;overflow-y:auto;\">";
-                    $hash = $commit['hash'];
-                    $files = explode("\n", $repo->get_files_by_commit($hash));                   
 
-                    $renderer->doc .= "<table><tr><th>What happened</th><th>File</th><th>link</th></tr>";
-                    foreach ($files as $file)
-                    {                
-                        $renderer->doc .= "<tr><td>";
-                        if ($file === "") continue;
-                        
-                        $change = substr($file, 0, 1);
-                        switch($change)
-                        {
-                           case "A":
-                               $renderer->doc .= "Added:";
-                               break;
-                           case "M":
-                               $renderer->doc .= "Modified:";
-                               break;
-                           case "R":
-                               $renderer->doc .= "Removed:";
-                               break;
-                        }
-                        $renderer->doc .= "</td><td>";
-                        $file = substr($file, 2);
-                        $renderer->doc .= $file;
-                        $renderer->doc .= "</td><td>";
-                        $renderer->doc .= '   <form method="post">';
-                        $renderer->doc .= '      <input type="hidden" name="filename"  value="'.$file.'" />';
-                        $renderer->doc .= '      <input type="hidden" name="hash"  value="'.$commit['hash'].'" />';                        
-                        $renderer->doc .= '      <input type="submit" value="View Changes" />';
-                        $renderer->doc .= '   </form>';
-                        $renderer->doc .= "</td>";
-                        $renderer->doc .= "<tr>";
-                    }
-                    $renderer->doc .= "</table>";
-                    $renderer->doc .= "</div>\n";
-                    $divVisibility = " display:none;";
-                }       
-                               
-                $fileForDiff = trim($_REQUEST['filename']);                
-                $hashForDiff = trim($_REQUEST['hash']);                
-                if ($fileForDiff !== '' && $hashForDiff !== '')
-                {                    
-                    // Get left text (Current)
-                    $left_filename = DOKU_INC.$fileForDiff;
-                    $left_filename = str_replace("/", "\\", $left_filename);
-                    $renderer->doc .= '<h2>Changes to: '.$fileForDiff.'</h2>';
-                    $l_text = $this->getFileContents($left_filename);
-                    
-                    // Get right text (Latest in GIT)
-                    $r_text = $repo->getFile($fileForDiff, 'HEAD');
-                    
-                    // Show diff
-                    $df = new Diff(explode("\n",htmlspecialchars($l_text)), explode("\n",htmlspecialchars($r_text)));
-                    $tdf = new TableDiffFormatter();                
-                    $renderer->doc .= '<div class="table">';
-                    $renderer->doc .= '<table class="diff diff_inline">';
-                    $renderer->doc .= $tdf->format($df);
-                    $renderer->doc .= '</table>';
-                    $renderer->doc .= '</div>';
-                }                          
             }
             catch(Exception $e)
             {
@@ -186,7 +147,66 @@ class syntax_plugin_git_remotestatus extends DokuWiki_Syntax_Plugin {
         }
         return false;
     }
+   
+    //function render_commit_selector($renderer, $commits)
+    //{
+    //    $renderer->doc .= "<select id='git_commit' width=\"800\" style=\"width: 800px\" onchange='ChangeGitCommit();'>";
+    //    $index = 1;
+    //    foreach($commits as $commit)
+    //    {
+    //        $renderer->doc .= "<option value=\"".$commit['hash']."\">".$index." - ".$commit['message']."</option>";
+    //        $index++;
+    //    }
+    //    $renderer->doc .= '</select>';    
+    //}
     
+    //function render_changed_files_table($renderer, $commits, $repo)
+    //{
+    //    $renderer->doc .= '<h3>This is the content of the selected commit:</h3>';
+    //    $divVisibility = ""; // Make the first div visible as thats the first item in the select box
+    //    foreach($commits as $commit)
+    //    {
+    //        $renderer->doc .= "<div class=\"commit_div\" id='".$commit['hash']."' style=\"".$divVisibility." width: 100%;height: 175px;overflow:-moz-scrollbars-vertical;overflow-y:auto;\">";
+    //        $hash = $commit['hash'];
+    //        $files = explode("\n", $repo->get_files_by_commit($hash));                   
+
+    //        $renderer->doc .= "<table><tr><th>What happened</th><th>File</th><th>link</th></tr>";
+    //        foreach ($files as $file)
+    //        {                
+    //            if ($file === "") continue;
+
+    //            $renderer->doc .= "<tr><td>";
+                
+    //            $change = substr($file, 0, 1);
+    //            switch($change)
+    //            {
+    //                case "A":
+    //                    $renderer->doc .= "Added:";
+    //                    break;
+    //                case "M":
+    //                    $renderer->doc .= "Modified:";
+    //                    break;
+    //                case "R":
+    //                    $renderer->doc .= "Removed:";
+    //                    break;
+    //            }
+    //            $renderer->doc .= "</td><td>";
+    //            $file = substr($file, 2);
+    //            $renderer->doc .= $file;
+    //            $renderer->doc .= "</td><td>";
+    //            $renderer->doc .= '   <form method="post">';
+    //            $renderer->doc .= '      <input type="hidden" name="filename"  value="'.$file.'" />';
+    //            $renderer->doc .= '      <input type="hidden" name="hash"  value="'.$commit['hash'].'" />';                        
+    //            $renderer->doc .= '      <input type="submit" value="View Changes" />';
+    //            $renderer->doc .= '   </form>';
+    //            $renderer->doc .= "</td>";
+    //            $renderer->doc .= "</tr>";
+    //        }
+    //        $renderer->doc .= "</table>";
+    //        $renderer->doc .= "</div>\n";
+    //        $divVisibility = " display:none;";
+    //    }       
+    //}
     
     function getFileContents($filename)
     {

@@ -6,7 +6,7 @@
  
 require_once(DOKU_PLUGIN.'syntax.php');
 require_once(DOKU_PLUGIN.'git/lib/Git.php');
-require_once(DOKU_INC.'/inc/DifferenceEngine.php');
+
 
 /**
  * All DokuWiki plugins to extend the parser/rendering mechanism
@@ -14,6 +14,13 @@ require_once(DOKU_INC.'/inc/DifferenceEngine.php');
  */
 class syntax_plugin_git_localstatus extends DokuWiki_Syntax_Plugin {
     
+    var $helper = null;
+
+    function syntax_plugin_git_localstatus (){
+        $this->helper =& plugin_load('helper', 'git');
+        if(!$this->helper) msg('Loading the git helper in the git_localstatus class failed.', -1);
+    }
+
     /**
      * return some info
      */
@@ -71,9 +78,7 @@ class syntax_plugin_git_localstatus extends DokuWiki_Syntax_Plugin {
         // this return value appears in render() as the $data param there
         return $match_array;
     } 
-    
-    
-    
+        
     /**
      * Create output
      */
@@ -84,36 +89,88 @@ class syntax_plugin_git_localstatus extends DokuWiki_Syntax_Plugin {
             
             try
             {
-                // Get GIT commits
-                $repo = new GitRepo(DOKU_INC);
-                $waiting_to_commit = $repo->get_status();
-
-                if ($waiting_to_commit !== "") 
+                // If not logged in, go bugger off...
+                if (is_array($INFO['userinfo']) === false)
                 {
-                    // There are changes waiting to be committed to the local repo
-                    $this->renderCommitMessage($renderer);
-                    $files = explode("\n", $waiting_to_commit);                   
-                    $this->renderChangesMade($renderer, $files, $repo);
+                    $renderer->doc .= "<br/><br/>You need to be logged in to view this page. Please login.";
+                    return;
+                }
+            
+                // Get GIT commits
+                $this->getConf('');
+                $git_exe_path = $conf['plugin']['git']['git_exe_path'];
+                $datapath = $conf['savedir'];    
+                $repo = new GitRepo($datapath);
+                $repo->git_path = $git_exe_path;    
+
+                // Is there anything waiting to be commited?
+                $waiting_to_commit = $repo->get_status();
+                if ($waiting_to_commit !== "") 
+                {                    
+                    $renderer->doc .= '<h3>These are the files that have changed:</h3>';
+                    $renderer->doc .= '<p>They have not yet been commited. In order to see all changes to the workspace, commit them and reload this page.</p>';
+
+                    // Add a semaphore commit, telling the rendering engine that this isn't a real commit, rather we want to see the current
+                    $commits = array();
+                    if(!empty($commit)) unset($commit);
+                    $commit['hash'] = 'new';
+                    $commits[] = $commit;
+                    
+                    // Render page
+                    $this->helper->render_changed_files_table($renderer, $commits, $repo);                    
+                    $this->helper->renderChangesMade($renderer, $repo, 'Commit local');                    
+                    $this->renderCommitMessage($renderer, $repo);
+                    
                     return;
                 }
                 
                 // No local changes to be committed. Are we ready to push up?
-                if ($repo->ChangesAwaitingApproval())
+                if ($repo->LocalCommitsExist())
                 {
-                    // Get the files from the latest commit. There can only be one commit as the Wiki will become read-only after a commit
-                    $log = $repo->get_log('-1');
+                    if($this->helper->haveChangesBeenSubmitted() === true)
+                    {
+                        $renderer->doc .= '<h3>There are commits awaiting to the be pushed to Live!</h3>'; 
+                        
+                        $this->helper->resetGitStatusCache('upstream');
+                        $upsptreamUpdatesAvailable = $this->helper->CheckForUpstreamUpdates();
+                        if ($upsptreamUpdatesAvailable)
+                        {
+                            $renderer->doc .= '<p>Other initiatives are approved while this has been waiting for approval. Those changes need to be merged into this workspace before these changes can be approved. Click the link in the banner on top of the screen to open the "Upstream changes" page to merge.<br/>';
+                        }
+                        else
+                        {
+                            $renderer->doc .= '<p>One or more commits have been made to this workspace that are ready to be promoted to Live!<br/>';
+                            $renderer->doc .= 'These can include merges with changes made in other workspaces and approved by the SEPG.</p>';        
+                            $this->helper->renderAdminApproval($renderer);
+                        }
+
+                        $renderer->doc .= '<br/><br/><p>To investigate the changes made in this workspace please select a commit in the drop down list to view the changes contained in each.</p>';        
+                    }
+                    else
+                    {
+                        $renderer->doc .= '<h3>Commits have been made to this workspace that are ready for submission to the SEPG</h3>';     
+                        $renderer->doc .= '<p>TODO: add more information here</p>';     
+                        
+                        $this->renderSubmitMessage($renderer, $repo);
+                    }
+
+                    // Get the list of commits since the last push
+                    $log = $repo->get_log('origin/master..HEAD');
                     $commits = $repo->get_commits($log);
-                    $hash = $commits[0]['hash'];
-                    $files = explode("\n", $repo->get_files_by_commit($hash));                   
 
-                    $renderer->doc .= '<h3>Commit message:</h3>';        
-                    $renderer->doc .= $message.'<textarea>';        
-                    $renderer->doc .= $commits[0]['message'];
-                    $renderer->doc .= '</textarea><br/>';        
+                    // Add the "Everything" semaphore commit
+                    if(!empty($commit)) unset($commit);
+                    $commit['hash'] = 'all';
+                    $commit['message'] = 'All changes to this workspace';
+                    array_push($commits, $commit);
 
-                    // Show the approval sections
-                    $this->renderChangesMade($renderer, $files, $repo);
-                    $this->renderAdminApproval($renderer);
+                    // Render combo-box
+                    $renderer->doc .= '<br/><h3>Commits:</h3>';     
+                    $this->helper->render_commit_selector($renderer, $commits, true);
+
+                    $this->helper->render_changed_files_table($renderer, $commits, $repo);
+                    $this->helper->renderChangesMade($renderer, $repo, 'Approve Local');
+                    
                     return;
                 }                    
 
@@ -131,143 +188,38 @@ class syntax_plugin_git_localstatus extends DokuWiki_Syntax_Plugin {
         return false;
     }
     
-    function renderCommitMessage(&$renderer)
+
+    
+    function renderCommitMessage(&$renderer, $repo)
     {
-        $renderer->doc .= "<h3>Please provide a detailed summary of the changes to be submitted:</h3>";
+        $renderer->doc .= "<h3>Please enter a short summary of these intermediate changes</h3>";
+        $renderer->doc .= '<p>This short message will only be used within this workspace and is only intended to designate interim commits. You will be asked to opportunity to provide a detailed description of all the changes just before submitting this entire workspace= for approval.</p>';                
         $renderer->doc .= '<form method="post">';
         $renderer->doc .= '  <textarea name="CommitMessage" style="width: 800px; height: 80px;" ></textarea></br>';
-        $renderer->doc .= '  <input type="submit" name="cmd[commit]"  value="Submit for approval" />';
-        $renderer->doc .= '</form>';
-        $renderer->doc .= '  (Please note that submitting the changes for approval will make this workspace read-only)';                
-        $renderer->doc .= '<br/><br/>';                
+        $renderer->doc .= '  <input type="submit" name="cmd[commit_current]"  value="Commit Current Changes" />';
+        $renderer->doc .= '</form><br/>';
     }
     
-    function renderChangesMade(&$renderer, &$files, &$repo)
+    function renderSubmitMessage(&$renderer, $repo)
     {
-        global $INFO;
-        global $ID;
-        global $conf;
-        
-        $renderer->doc .= "<h3>Changes made in this workspace::</h3>";
-        $renderer->doc .= "<table><tr><th>What happened</th><th>Wiki page</th><th>Changes</th></tr>";
-        foreach ($files as $file)
-        {               
-            if ($file === "") continue;
+        $renderer->doc .= "<h3>Please provide a detailed description of ALL the changes to be submitted.</h3>";
+        $renderer->doc .= '<p>Before submitting, please consider the following: Has the content been reviewed for:';                
+        $renderer->doc .= '<ol>';                
+        $renderer->doc .= '<li>For the IP: Have all the deliverables been implemented? Please refer to the IP (link on the top of the page) to double check.</li>';                
+        $renderer->doc .= '<li>For the IP: Have you planned how the adoption of these changes is ensured? Please refer to Adption plans for more information.</li>';                
+        $renderer->doc .= '<li>For each page: Is revision frequency specified?</li>';                
+        $renderer->doc .= '<li>For each page: Is SEO metadata specified?</li>';                
+        $renderer->doc .= '<li>For each page: Are all images implemented as Imagemaps?</li>';                
+        $renderer->doc .= '</ol>';                
 
-            //            $skipNonWikiPages = $conf['plugin']['git']['HideNonWikiPages'];
-            //$skipNonWikiPages = true;
-            //if (($skipNonWikiPages === true) && (strpos($file, 'data/pages') === false))
-            //    continue;
-
-            $renderer->doc .= "<tr><td>";
-            
-            $change = substr($file, 0, 2);
-            if (strpos($change, '?') !== false)
-                $renderer->doc .= "Added:";
-            else if (strpos($change, 'M') !== false)
-                $renderer->doc .= "Modified:";
-            else if (strpos($change, 'A') !== false)
-                $renderer->doc .= "Added:";
-            else if (strpos($change, 'D') !== false)
-                $renderer->doc .= "Removed:";
-            else if (strpos($change, 'R') !== false)
-                $renderer->doc .= "Removed:";
-            
-            $renderer->doc .= "</td><td>";
-            $file = trim(substr($file, 2));
-            $page = $this->getPageFromFile($file);            
-            $renderer->doc .=  '<a href="http://localhost:8002/doku.php?id='.$page.'">'.$page.'</a>';
-            $renderer->doc .= "</td><td>";
-            // Is this a wiki page
-            if (strpos($file, 'data/page') !== false)
-            {                
-                // only show diff buttens for wiki pages...
-                $renderer->doc .= '   <form method="post">';
-                $renderer->doc .= '      <input type="hidden" name="filename"  value="'.$file.'" />';
-                $renderer->doc .= '      <input type="submit" value="View Changes" />';
-                $renderer->doc .= '   </form>';
-            }
-            $renderer->doc .= "</td>";
-            $renderer->doc .= "<tr>";
-        }
-        $renderer->doc .= "</table>";
-
-        $fileForDiff = trim($_REQUEST['filename']);                
-        if ($fileForDiff !== '')
-        {                    
-            // Get left text (Current)
-            $left_filename = DOKU_INC.$fileForDiff;
-            $left_filename = str_replace("/", "\\", $left_filename);
-            $renderer->doc .= '<h2>Changes to: '.$fileForDiff.'</h2>';
-            $l_text = $this->getFileContents($left_filename);
-            
-            // Get right text (Latest in GIT)
-            $r_text = $repo->getFile($fileForDiff, 'HEAD');
-            
-            // Show diff
-            $df = new Diff(explode("\n",htmlspecialchars($l_text)), explode("\n",htmlspecialchars($r_text)));
-            $tdf = new TableDiffFormatter();                
-            $renderer->doc .= '<div class="table">';
-            $renderer->doc .= '<table class="diff diff_inline">';
-            $renderer->doc .= $tdf->format($df);
-            $renderer->doc .= '</table>';
-            $renderer->doc .= '</div>';
-        }
-        
+        $renderer->doc .= '<br/><p>And finally: Please note that submitting the changes for approval will make this workspace read-only. Therefore, only submit fully completed IPs.</p>';                
+        $renderer->doc .= '<form method="post">';
+        $renderer->doc .= '  <textarea name="CommitMessage" style="width: 800px; height: 80px;" ></textarea></br>';
+        $renderer->doc .= '  <input type="submit" name="cmd[commit_submit]"  value="Submit for approval" />';
+        $renderer->doc .= '</form><br/>';
     }
 
-    function renderAdminApproval(&$renderer)
-    {
-        $isAdmin = $this->isCurrentUserAnAdmin();
-        if ($isAdmin)
-        {
-            $renderer->doc .= '<h2>TODO: Only show the bit below if you are an admin</h2>';        
-            $renderer->doc .= '<form method="post">';
-            $renderer->doc .= '   <input type="submit" name="cmd[revert commit]" value="Reject and revert Commit" />';
-            $renderer->doc .= '   <input type="submit" name="cmd[push]" value="Push to live!" />';
-            $renderer->doc .= '</form>';
-        }
-    }
-    
-    function getPageFromFile($file)
-    {
-        // If it's not a wiki page, just return the normal filename
-        if (strpos($file, 'data/pages') === false) return $file;
 
-        // Replace all sorts of stuff so it makes sense to non-technical users.
-        $page = str_replace('data/pages/', ':', $file);
-        $page = str_replace('.txt', '', $page);
-        $page = str_replace('/', ':', $page);
-        $page = trim($page);
-        
-        return $page;
-    }
-        
-    function isCurrentUserAnAdmin()
-    {
-        global $INFO;
-        $grps=array();
-        if (is_array($INFO['userinfo'])) {
-            foreach($INFO['userinfo']['grps'] as $val) {
-                $grps[]="@" . $val;
-            }
-        }
-
-        
-        return in_array("@admin", $grps);
-    }
-    
-    function getFileContents($filename)
-    {
-        if (file_exists($filename) === false) return "Page does not exist in the wiki";
-        
-        // get contents of a file into a string
-        $handle = fopen($filename, "r");
-        $contents = fread($handle, filesize($filename));
-        fclose($handle);
-        
-        return $contents;
-    }
     
 }
  

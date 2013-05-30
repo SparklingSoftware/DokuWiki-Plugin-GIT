@@ -87,10 +87,22 @@ class GitRepo {
         return $this->repo_path;
     }
         
-
-//	public $git_path = '/usr/bin/git';
-    // TODO: Read path from plugin config
-	public $git_path = "\"C:\\Program Files (x86)\\Git\\bin\\git.exe\"";
+    public $git_path = '/usr/bin/git';
+    /* The git path defaults to the default location for linux, the consumer of this class needs to override with setting from config:
+    
+    function doSomeGitWork() {
+       global $conf;
+       $this->getConf('');
+       $git_exe_path = $conf['plugin']['git']['git_exe_path'];
+    
+       $repo = new GitRepo(.....);
+       $repo->git_path = $git_exe_path;
+       .... do more work here ....
+    }
+    
+     Make sure you enclose the path with double quotes for windows paths like this:
+     $conf['plugin']['git']['git_exe_path'] = '"C:\Program Files (x86)\Git\bin\git.exe"';
+    */
 
 	/**
 	 * Create a new git repository
@@ -274,13 +286,17 @@ class GitRepo {
      * @return  string
      */
 	public function getFile($filename, $branch = 'HEAD') {
+
+        $cmd = 'show '.$branch.':'.$filename;
         try
         {
-    		return $this->run('show '.$branch.':'.$filename);
+    		return $this->run($cmd);
         }
         catch (Exception $e)
         {
-            return "Page not found in master";
+            // msg('Exception during command: '.$cmd);
+            // Not really an exception, if a new page has been added the exception is part of normal operation :-(
+            return "Page not found";
         }
 	}
     
@@ -304,7 +320,7 @@ class GitRepo {
         }
 	}
     
-    function ChangesAwaitingApproval() {
+    function LocalCommitsExist() {
         $status = $this->get_status(false);
         $pos = strpos($status, 'Your branch is ahead of');
         return $pos > 0;            
@@ -318,6 +334,8 @@ class GitRepo {
         foreach($output as $line)
         {
             if(strpos($line, 'commit')===0){
+                // Skip merges
+                if (strpos($line, 'merge') > 0) continue;
                 if(!empty($commit)){
                     array_push($history, $commit);	
                     unset($commit);
@@ -356,7 +374,6 @@ class GitRepo {
 		return $this->run("diff-tree -r --name-status --no-commit-id ".$hash);
 	}
     
-
 	/**
 	 * Runs a `git commit` call
 	 *
@@ -368,17 +385,27 @@ class GitRepo {
 	 */
 	public function commit($message = "blank") {
         try {
+            $cmd = "gc";
+            $fullcmd = "cd \"".$this->repo_path."\" && ".$this->git_path." ".$cmd;
+            $this->run_command($fullcmd);
+
+            $cmd = "prune";
+            $fullcmd = "cd \"".$this->repo_path."\" && ".$this->git_path." ".$cmd;
+            $this->run_command($fullcmd);
+            
             $cmd = "add . -A";
             $fullcmd = "cd \"".$this->repo_path."\" && ".$this->git_path." ".$cmd;
             $this->run_command($fullcmd);
         
-            $cmd = "commit -am \"".$message."\"";
+            $cmd = "commit -a -m \"".$message."\"";
             $fullcmd = "cd \"".$this->repo_path."\" && ".$this->git_path." ".$cmd;
 		    $this->run_command($fullcmd);
+            return true;
         }
         Catch (Exception $e)
         {
             msg($e->getMessage());
+            return false;
         }
 	}
     
@@ -407,10 +434,13 @@ class GitRepo {
 	 * @return  string
 	 */
 	public function clone_from($source) {
-        try {
-            $cmd = "clone --local $source \"".$this->repo_path."\"";
+
+    try 
+        {
+            $cmd = "clone -q $source \"".$this->repo_path."\"";
             $fullcmd = "cd \"".$this->repo_path."\" && ".$this->git_path." ".$cmd;
-		    $this->run_command($fullcmd);
+            // msg('Full command: '.$fullcmd);
+            $this->run_command($fullcmd);
         }
         Catch (Exception $e)
         {
@@ -530,9 +560,23 @@ class GitRepo {
      * @param   string $branch
      * @return  string
      */
-    public function merge($branch)
+    public function merge($branch, $msg = "")
     {
-        return $this->run("merge $branch --no-ff");
+        if ($msg == "") return $this->run("merge $branch --no-ff");
+        return $this->run("merge $branch --no-ff -m ".$msg);
+    }
+
+    /**
+     * Runs a `git reset` call
+     *
+     * Reverts the last commit, leaving the local files intact
+     *
+     * @access  public
+     * @return  string
+     */
+    public function revertLastCommit()
+    {
+        return $this->run("reset --soft HEAD~1");
     }
 
 
@@ -546,6 +590,26 @@ class GitRepo {
     {
         return $this->run("fetch");
     }
+
+    /**
+     * Tests whether origin points to a valid repo
+     *
+     * @access  public
+     * @return  string
+     */
+    public function test_origin()
+    {
+        try
+        {
+           $this->run("fetch --dry-run");
+           return true;
+        }
+        catch (Exception $e)
+        {
+           return false;
+        }
+    }
+
 
     /**
      * Add a new tag on the current position
