@@ -7,10 +7,34 @@
 if(!defined('DOKU_INC')) die();
 if(!defined('DOKU_PLUGIN')) define('DOKU_PLUGIN',DOKU_INC.'lib/plugins/');
 require_once(DOKU_PLUGIN.'git/lib/Git.php');
+require_once(DOKU_INC.'inc/search.php');
+require_once(DOKU_INC.'/inc/DifferenceEngine.php');
+
+function git_callback_search_wanted(&$data,$base,$file,$type,$lvl,$opts) {
+    global $conf;
+
+	if($type == 'd'){
+		return true; // recurse all directories, but we don't store namespaces
+	}
+    
+    if(!preg_match("/.*\.txt$/", $file)) {  // Ignore everything but TXT
+		return true;
+	}
+    
+	// get id of this file
+	$id = pathID($file);
+    
+    $item = &$data["$id"];
+    if(! isset($item)) {
+        $data["$id"]= array('id' => $id, 
+                'file' => $file);
+    }
+}
+
 
 class helper_plugin_git extends DokuWiki_Plugin {
 
-    var $datahelper = null;
+    var $dt = null;
     var $sqlite = null;
 
     function getMethods(){
@@ -29,17 +53,50 @@ class helper_plugin_git extends DokuWiki_Plugin {
 
     function rebuild_data_plugin_data() {
         // Load the data plugin only if we need to
-        if(!$this->datahelper)
+        if(!$this->dt)
         {
-            $this->datahelper =& plugin_load('helper', 'data');
-            if(!$this->datahelper)
+            $this->dt =& plugin_load('syntax', 'data_entry');
+            if(!$this->dt)
             {
-                msg('Error loading the data helper class from GIT Helper. Make sure the data plugin is installed.',-1);
+                msg('Error loading the data table class from GIT Helper. Make sure the data plugin is installed.',-1);
                 return;
             }
         }
 
-        $this->datahelper->rebuild_data();
+        global $conf;
+        $result = '';
+        $data = array();
+        search($data,$conf['datadir'],'git_callback_search_wanted',array('ns' => $ns));
+
+        $output = array();        
+        foreach($data as $entry) {
+        
+            // Get the content of the file
+            $filename = $conf['datadir'].$entry['file'];
+            if (strpos($filename, 'syntax') > 0) continue;  // Skip instructional pages
+            $body = @file_get_contents($filename);
+                       
+            // Run the regular expression to get the dataentry section
+            $pattern = '/----.*dataentry.*\R----/s';
+            if (preg_match($pattern, $body, $matches) === false) {
+                continue;
+            }
+
+            foreach ($matches as $match) {
+                
+                // Re-use the handle method to get the formatted data
+                $cleanedMatch = htmlspecialchars($match);             
+                $dummy = "";
+                $formatted = $this->dt->handle($cleanedMatch, null, null, $dummy);
+                $output['id'.count($output)] = $formatted;                  
+
+                // Re-use the save_data method to .... (drum roll) save the data. 
+                // Ignore the returned html, just move on to the next file
+                $html = $this->dt->_saveData($formatted, $entry['id'], 'Title'.count($output));
+            }
+        }
+        
+        msg('Data entry plugin found and refreshed all '.count($output).' entries.');
     }    
     
     /**
@@ -69,7 +126,8 @@ class helper_plugin_git extends DokuWiki_Plugin {
         if (!$res) return;
         
         $res = $this->sqlite->query("SELECT status FROM git WHERE repo = 'local'");
-        $status = sqlite_fetch_single($res);
+        $rows = $this->sqlite->res2arr($res);
+        $status = $rows[0]['status'];
         if ($status !== 'submitted' ) $changesAwaiting = false;
 
         return $changesAwaiting;
@@ -116,6 +174,8 @@ class helper_plugin_git extends DokuWiki_Plugin {
             $repo = new GitRepo($destination, true, false);
             $repo->git_path = $git_exe_path;
             $repo->clone_from($origin);
+            
+            
         }
         catch (Exception $e)
         {
@@ -161,6 +221,7 @@ class helper_plugin_git extends DokuWiki_Plugin {
         
         $renderer->doc .= "<select id='git_commit' width=\"800\" style=\"width: 800px\" onchange='ChangeGitCommit();'>";
         $index = 1;
+        $renderer->doc .= "<option>Select a commit</option>";
         foreach($commits as $commit)
         {
             // Replace merge commit message with a more user friendly msg, leaving the orrigional
@@ -326,7 +387,7 @@ class helper_plugin_git extends DokuWiki_Plugin {
                 $l_text = $this->getFileContents($current_filename);                     
 
                 // RIGHT: Latest in GIT to be merged
-                $l_text = $repo->getFile($fileForDiff, 'HEAD');
+                $r_text = $repo->getFile($fileForDiff, $hash);
             }
                         
             // Show diff
@@ -399,8 +460,10 @@ class helper_plugin_git extends DokuWiki_Plugin {
         $res = $this->loadSqlite();
         if (!$res) return;
         
-        $res = $this->sqlite->query("SELECT timestamp FROM git WHERE repo = 'local';");
-        $timestamp = (int) sqlite_fetch_single($res);
+        $sql = "SELECT timestamp FROM git WHERE repo = 'local'";
+        $res = $this->sqlite->query($sql);
+        $rows = $this->sqlite->res2arr($res);
+        $timestamp = $rows[0]['timestamp'];        
         if ($timestamp < time() - (60 * 30))  // 60 seconds x 5 minutes
         { 
             $hasCacheTimedOut = true; 
@@ -416,8 +479,10 @@ class helper_plugin_git extends DokuWiki_Plugin {
         $res = $this->loadSqlite();
         if (!$res) return;
         
-        $res = $this->sqlite->query("SELECT status FROM git WHERE repo = 'local'");
-        $status = sqlite_fetch_single($res);
+        $sql = "SELECT status FROM git WHERE repo = 'local'";
+        $res = $this->sqlite->query($sql);
+        $rows = $this->sqlite->res2arr($res);
+        $status = $rows[0]['status'];        
         if ($status !== 'submitted' ) $changesAwaiting = false;
         
         return $changesAwaiting;
@@ -430,8 +495,10 @@ class helper_plugin_git extends DokuWiki_Plugin {
         $res = $this->loadSqlite();
         if (!$res) return;
         
-        $res = $this->sqlite->query("SELECT timestamp FROM git WHERE repo = 'upstream';");
-        $timestamp = (int) sqlite_fetch_single($res);
+        $sql = "SELECT timestamp FROM git WHERE repo = 'upstream';";
+        $res = $this->sqlite->query($sql);
+        $rows = $this->sqlite->res2arr($res);
+        $timestamp = $rows[0]['timestamp'];        
         if ($timestamp < time() - (60 * 60))  // 60 seconds x 60 minutes = 1 hour
         { 
             $hasCacheTimedOut = true; 
@@ -446,8 +513,10 @@ class helper_plugin_git extends DokuWiki_Plugin {
         $res = $this->loadSqlite();
         if (!$res) return;
         
-        $res = $this->sqlite->query("SELECT status FROM git WHERE repo = 'upstream'");
-        $status = sqlite_fetch_single($res);
+        $sql = "SELECT status FROM git WHERE repo = 'upstream'";
+        $res = $this->sqlite->query($sql);
+        $rows = $this->sqlite->res2arr($res);
+        $status = $rows[0]['status'];        
         if ($status === 'clean') $updatesAvailable = false;
         
         return $updatesAvailable;
