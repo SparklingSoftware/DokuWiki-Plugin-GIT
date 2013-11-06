@@ -44,7 +44,7 @@ class action_plugin_git_merge extends DokuWiki_Action_Plugin {
             
             $repo = new GitRepo($datapath);
             $repo->git_path = $git_exe_path;   
-            $repo->pull('', '');
+            $repo->pull('origin', 'master');
             
             if(!$this->helper) {
                 msg('GIT helper is null in the merge.php file');
@@ -59,7 +59,6 @@ class action_plugin_git_merge extends DokuWiki_Action_Plugin {
             return false;
         }
     }
-
 
     function ignore()
     {

@@ -414,16 +414,11 @@ class helper_plugin_git extends DokuWiki_Plugin {
     
     function isCurrentUserAnAdmin()
     {
-        global $INFO;
-        $grps=array();
-        if (is_array($INFO['userinfo'])) {
-            foreach($INFO['userinfo']['grps'] as $val) {
-                $grps[]="@" . $val;
-            }
+        function isCurrentUserAnAdmin()
+        {
+            global $INFO;
+            return ($INFO['isadmin']);
         }
-
-        
-        return in_array("@admin", $grps);
     }
     
     function getFileContents($filename)
